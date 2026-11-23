@@ -1,0 +1,44 @@
+name: Build
+
+# Every push and pull request builds the workflow.
+# Pushing a tag like v2.0.0 also publishes it as a GitHub release.
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check the script
+        run: /bin/zsh -n workflow/terminalfinder.sh
+
+      - name: Build
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            python3 scripts/build.py --version "$GITHUB_REF_NAME"
+          else
+            python3 scripts/build.py
+          fi
+
+      - name: Check the bundle
+        run: |
+          mkdir unpacked
+          unzip -q dist/TerminalFinder.alfredworkflow -d unpacked
+          plutil -lint unpacked/info.plist
+          test -x unpacked/terminalfinder.sh
+
+      - name: Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/TerminalFinder.alfredworkflow \
+            --title "$GITHUB_REF_NAME" --generate-notes
