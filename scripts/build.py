@@ -2,6 +2,7 @@
 """Build TerminalFinder.alfredworkflow from the files in workflow/.
 
     scripts/build.py [--version 2.0.0] [--out dist]
+    scripts/build.py --icons    # redraw workflow/icons/routes (macOS only)
 
 info.plist is generated here, so adding an app means adding one line to
 FILE_MANAGERS or TERMINALS (plus its handlers in workflow/terminalfinder.sh).
@@ -10,6 +11,7 @@ Only the Python standard library is used.
 
 import argparse
 import plistlib
+import subprocess
 import uuid
 import zipfile
 from pathlib import Path
@@ -75,6 +77,35 @@ def routes():
                 yield term[0] + fm[0], term[:3], fm[:3]
 
 
+def route_icon(keyword, src):
+    """The drawn source-and-destination icon, or just the source app's."""
+    combined = SRC / "icons" / "routes" / f"{keyword}.png"
+    return combined if combined.exists() else SRC / "icons" / f"{src[1]}.png"
+
+
+def draw_route_icons():
+    """Redraw workflow/icons/routes from the app icons in workflow/icons.
+
+    The results are committed, so a normal build needs neither Swift nor macOS.
+    Routes whose apps have no icon there are skipped.
+    """
+    out = SRC / "icons" / "routes"
+    out.mkdir(exist_ok=True)
+    binary = ROOT / "dist" / "compose_icon"
+    binary.parent.mkdir(exist_ok=True)
+    subprocess.run(["swiftc", "-O", "-o", str(binary),
+                    str(ROOT / "scripts" / "compose_icon.swift")], check=True)
+    for keyword, src, dst in routes():
+        parts = [SRC / "icons" / f"{app[1]}.png" for app in (src, dst)]
+        if all(part.exists() for part in parts):
+            subprocess.run([str(binary), *map(str, parts),
+                            str(out / f"{keyword}.png")], check=True)
+            print(f"{keyword}: {src[2]} → {dst[2]}")
+        else:
+            print(f"{keyword}: skipped, no icon for one of the apps")
+    binary.unlink()
+
+
 def build_plist(version):
     notify = uid("notification")
     objects, connections, uidata, icons = [], {}, {}, {}
@@ -121,7 +152,7 @@ def build_plist(version):
         y = 20 + row * 110
         uidata[kw_uid] = {"xpos": 60, "ypos": y}
         uidata[run_uid] = {"xpos": 300, "ypos": y}
-        icons[kw_uid] = SRC / "icons" / f"{src[1]}.png"
+        icons[kw_uid] = route_icon(keyword, src)
 
     # The script prints only when something went wrong.
     objects.append({
@@ -170,7 +201,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--version", default="0.0.0-dev")
     parser.add_argument("--out", default=str(ROOT / "dist"))
+    parser.add_argument("--icons", action="store_true",
+                        help="redraw the route icons and exit")
     args = parser.parse_args()
+    if args.icons:
+        draw_route_icons()
+        return
     version = args.version.removeprefix("v")
 
     plist, icons = build_plist(version)
